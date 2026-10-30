@@ -1,0 +1,17 @@
+[project]
+name = "xgb-pathfinder"
+version = "0.1.0"
+description = "A framework for finding contextual information inside xgboost models"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "geopandas>=1.2.0",
+    "matplotlib>=3.11.2",
+    "numpy>=2.4.6",
+    "pandas>=3.1.0",
+    "shap>=0.51.0",
+    "xgboost>=3.2.0",
+]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["geographic", "analysis"]

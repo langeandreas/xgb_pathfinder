@@ -1,10 +1,7 @@
 # xgb-pathfinder
 
-A generalized, SHAP-like package for explaining XGBoost tree-based models through trajectory metrics, cohort analysis, and geographic impact visualization.
+A generalized, SHAP-like package for explaining XGBoost tree-based models through trajectory metrics, cohort analysis, and geographic impact visualization. This package has been developed in accordance with the methodology of my master's thesis which is currently under review. 
 
-**Status**: ✅ Phases 1-4 complete (Core + Analysis + Geographic)  
-**Version**: 0.1.0  
-**Python**: 3.8+
 
 ---
 
@@ -16,7 +13,7 @@ A generalized, SHAP-like package for explaining XGBoost tree-based models throug
    - Velocity: Feature gain per iteration
    - Acceleration: Change in velocity (identifies turning points)
    - Feature Confusion Index (FCI): Conditional probability metric
-   - Behavioral Signature: CORE_DRIVER, LATE_LEARNER, OUTLIER_SPECIALIST, etc.
+   - Experimental/not included in the thesis: Behavioral Signature: CORE_DRIVER, LATE_LEARNER, OUTLIER_SPECIALIST, etc.
 
 2. **Cohort Analysis** — Population segments defined by decision tree patterns
    - Scope signature: Early-stage conditions defining segment
@@ -39,18 +36,24 @@ cd xgb_pathfinder
 pip install -e .
 ```
 
-### Dependencies
+### User Install
 
-```bash
-pip install xgboost numpy pandas scikit-learn shap
+pyPi install/publish coming soon
 
-# Optional: Geographic features
-pip install geopandas folium matplotlib
-```
 
 ---
 
 ## Quick Start
+
+For an executable walkthrough, open [usage_demo.ipynb](examples/usage_demo.ipynb),
+select the project's Python environment, and run all cells. It uses synthetic
+households and boundaries, so no external datasets are required. The notebook
+covers training, trajectories, cohorts, CIS/SDS, geographic maps, regional
+decision paths, and exports using the current API.
+Start the kernel in the notebook's `examples` directory to avoid the package's
+root-level `types.py` shadowing the standard library. In VS Code, set
+`jupyter.notebookFileRoot` to `${fileDirname}` if your kernel starts at the
+workspace root.
 
 ### Basic API
 
@@ -79,13 +82,7 @@ for cohort in cohorts.head().itertuples(index=False):
           f"risk={cohort.risk_rate:.2%}, "
           f"impact={cohort.decision_impact:.3f}")
 
-# Get comprehensive feature profiles
-profiles = explainer.get_feature_profiles()
-for feat_name, profile in profiles.items():
-    print(f"{feat_name}:")
-    print(f"  - Behavior: {profile['behavior_signature']}")
-    print(f"  - Peak importance: {profile['importance_trajectory']['peak_velocity']:.4f}")
-    print(f"  - SHAP impact: {profile['decision_impact']['total_swing']:.4f}")
+
 
 # Geographic aggregation
 regions = explainer.aggregate_by_region(
@@ -145,7 +142,6 @@ exp.plot_geographic_impact(geodata_path, mapping, color_by="cohort_count")
 interactive = exp.plot_geographic_impact(
     geodata_path,
     mapping,
-    backend="folium",
     fill_color="YlGnBu",
     zoom_start=7,
 )
@@ -165,12 +161,12 @@ from xgb_pathfinder import load_feature_labels
 scores = exp.compute_importance_scores()  # one row per feature, sorted by CIS
 fig = exp.plot_importance_scores(
     sort_by="cis",  # default: all features, ordered by CIS
-    feature_labels=load_feature_labels("data/features_explanations.csv"),
+    feature_labels=load_feature_labels("data/label_file.csv"),
     output_path="results/cis_sds_features.png",  # optional
 )
 # Or plot an already-computed score table directly:
 from xgb_pathfinder import plot_cis_sds
-fig = plot_cis_sds(scores, top_n=25, sort_by="sds")
+fig = plot_cis_sds(scores, top_n=25, sort_by="cis")
 ```
 
 ### Cohorts for an Administrative Region
@@ -179,14 +175,65 @@ Recalculates cohorts using only the training households in the selected region. 
 
 ```python
 region = exp.extract_region_cohorts(
-    "Colombo",  # region name (case-insensitive) or adm_code
-    mapping_path="data/lka/hh_geo_mapping.csv",
+    "Region Name",  # region name (case-insensitive) or adm_code
+    mapping_path="data/file_name.csv",
     admin_level="adm2",
     order_by="support",  # or "confidence", "decision_impact"
     top_n=10,
 )
-exp.plot_region_cohorts("Colombo", mapping_path="data/lka/hh_geo_mapping.csv")
+exp.plot_region_cohorts("Region Name", mapping_path="data/file_name.csv")
 ```
+
+### Standalone Geographic Functions
+
+Membership construction is shared with `analysis.cohort_engine`, and regional
+aggregation is shared with `geographic.impact_aggregator`. These functions are
+also available from the package root and `geographic`; the visualization module
+re-exports them for convenience rather than implementing a second pipeline.
+
+```python
+from xgb_pathfinder import (
+    aggregate_cohorts_by_region,
+    build_cohort_membership,
+    load_admin_geodata,
+    load_household_admin_mapping,
+    plot_cohort_geography,
+    visualise_cohort_map,
+    visualise_region_decision_paths,
+)
+
+cohorts = exp.extract_cohorts()
+membership = build_cohort_membership(cohorts, exp.get_segments(), exp.sample_ids)
+mapping = load_household_admin_mapping("data/hh_geo_mapping.csv")
+polygons = load_admin_geodata("data/geodata.csv")
+regions = aggregate_cohorts_by_region(cohorts, mapping, membership)
+fig = visualise_cohort_map(regions, polygons, color_by="mean_member_impact")
+
+# Or aggregate and plot in one step:
+fig = plot_cohort_geography(
+    cohorts, mapping, membership, polygons,
+    impact_metric="cumulative_member_impact",
+    output_path="cohort_map.png",
+)
+
+region = exp.extract_region_cohorts("Colombo", hh_admin_df=mapping)
+fig = visualise_region_decision_paths(region, top_n=5)
+```
+
+`build_cohort_membership` accepts rule assignments with `sample_index` and
+`assigned_rule_ids` columns. Indices address the supplied sample ID sequence;
+without it they are used as IDs. Each sample has at most one membership per
+cohort, even when it matches several contributing rules. Unmatched samples
+remain in the mapping with an empty list.
+
+`aggregate_cohorts_by_region` requires evaluated membership and returns the
+same regional metric dictionary as `ModelExplainer.aggregate_by_region`.
+An empty membership mapping returns no regional evidence. Both map functions
+accept a GeoDataFrame or a geodata file path and return a Matplotlib figure;
+they reject empty regional evidence. Decision-path plots use the current
+regional cohort table, including its scope, decider evidence, and household
+share. These functions use current impact metrics, not the former
+`dominant`/`cohort_share`/`risk_rate` map modes.
 
 ---
 
@@ -197,11 +244,11 @@ exp.plot_region_cohorts("Colombo", mapping_path="data/lka/hh_geo_mapping.csv")
 **`ModelExplainer`** — Main entry point
 
 Public methods:
-- `compute_trajectory_metrics()` → Dict[feature → trajectory metrics]
+- `compute_trajectory_metrics()` → dict[feature → trajectory metrics]
 - `extract_cohorts(min_support)` → DataFrame with one row per cohort
-- `get_feature_profiles()` → Dict[feature → profile]
+- `get_feature_profiles()` → dict[feature → profile]
 - `get_segments(rules)` → DataFrame with sample-to-cohort mapping
-- `aggregate_by_region(geodata, mapping)` → Dict[region → impact metrics]
+- `aggregate_by_region(geodata, mapping)` → dict[region → impact metrics]
 - `plot_geographic_impact(geodata, mapping)` → Map object
 - `to_dict() / to_json() / to_csv()` → Export metrics
 
@@ -225,11 +272,9 @@ Public methods:
 | `impact_prioritizer.py` | Rank regions with a configurable heuristic path score |
 | `geo_plotter.py` | Choropleth visualization (matplotlib/folium) |
 | `mappings.py` | Admin hierarchy & sample→region utilities |
-| `visualizations.py` | Dataframe-based loaders, cohort maps, regional summaries, and decision paths |
+| `visualizations.py` | Dataframe-based loaders, cohort impact maps, and regional decision-path plots |
 
-The dataframe-based geography helpers are available from
-`xgb_pathfinder.geographic` and the package root, including
-`visualise_region_decision_paths(..., min_support=1, order_by="confidence")`.
+
 
 ### Type Definitions (`types.py`)
 
@@ -255,6 +300,7 @@ All thresholds are configurable:
 ## Data Models
 
 ### FeatureTrajectory
+(fictional example)
 
 ```python
 {
@@ -274,11 +320,11 @@ All thresholds are configurable:
     "peak_iteration": 15,
     "peak_velocity": 0.8901,
     "total_gain": 5.432,
-    "behavior_signature": "CORE_DRIVER",  # or LATE_LEARNER, OUTLIER_SPECIALIST, etc.
 }
 ```
 
 ### CohortRecord
+(fictional example)
 
 ```python
 {
@@ -299,6 +345,7 @@ All thresholds are configurable:
 ```
 
 ### RegionImpactMetric
+(fictional example)
 
 ```python
 {
@@ -318,21 +365,9 @@ All thresholds are configurable:
 
 ---
 
-## Behavior Signatures
-
-Features are classified based on acceleration patterns:
-
-| Signature | Pattern | Meaning |
-|-----------|---------|---------|
-| **CORE_DRIVER** | Early accel → late stabilization | Strong early, importance plateaus |
-| **LATE_LEARNER** | Weak early, late acceleration | Importance grows over time |
-| **OUTLIER_SPECIALIST** | High early AND late acceleration | Continuous improvement, special case handling |
-| **UNSTABLE** | High variance | Oscillating importance, possible collinearity |
-| **STABLE_BASELINE** | Consistent velocity | Steady contribution |
-
----
 
 ## Configuration
+(fictional example)
 
 Customize via `config` parameter or environment variables:
 
@@ -356,97 +391,13 @@ explainer = ModelExplainer(
 )
 ```
 
----
+# References
 
-## Example: Complete Workflow
+The methodology and metrics used in this project are inspired by SHAP (SHapley Additive exPlanations) and XGBoost's feature importance analysis. For more information, refer to:
 
-```python
-import pandas as pd
-from xgb_pathfinder import ModelExplainer
+- [SHAP Documentation](https://shap.readthedocs.io/)
+- [XGBoost Documentation](https://xgboost.readthedocs.io/)
+- Master's thesis by Andreas Lange (currently in the grading process) It has been rewritten from the thesis' original implementation to provide a framework for analyzing xgboost models and has been designed to be applicable to different data sets.
 
-# 1. Initialize
-explainer = ModelExplainer(
-    booster=model,
-    X_train=X_train,
-    y_train=y_train,
-    feature_names=feature_names,
-)
-
-# 2. Analyze trajectories
-trajectories = explainer.compute_trajectory_metrics()
-print(f"Found {len(trajectories)} features")
-
-# 3. Extract cohorts
-cohorts = explainer.extract_cohorts(min_support=50)
-print(f"Extracted {len(cohorts)} cohorts")
-
-# 4. Get feature profiles
-profiles = explainer.get_feature_profiles()
-for name, prof in profiles.items():
-    print(f"{name}: {prof['behavior_signature']}")
-
-# 5. Geographic analysis
-sample_to_region = pd.read_csv("mapping.csv", index_col="sample_id")
-
-regions = explainer.aggregate_by_region(
-    geodata_path="boundaries.geojson",
-    sample_region_mapping=sample_to_region,
-)
-
-print("Top regions by impact:")
-for i, (region, metrics) in enumerate(list(regions.items())[:5], 1):
-    print(f"{i}. {region}: impact={metrics['total_impact']:.2f}")
-
-# 6. Visualize
-fig = explainer.plot_geographic_impact(
-    geodata_path="boundaries.geojson",
-    sample_region_mapping=sample_to_region,
-    output_path="impact_map.html",
-)
-
-# 7. Export
-explainer.to_csv("results/")
-explainer.to_json("results/pathfinder.json")
-```
-
----
-
-## Next Steps (Phases 5-6)
-
-1. **Phase 5: Export & Integration**
-   - Integrate all engines into ModelExplainer
-   - Implement to_dict(), to_json(), to_csv() export
-   - Integration tests with real XGBoost model
-
-2. **Phase 6: Documentation & Polish**
-   - Comprehensive docstrings
-   - Example Jupyter notebooks
-   - API reference documentation
-
----
-
-## Design Principles
-
-1. ✅ **Generalized**: No hardcoded data-specific references
-2. ✅ **SHAP-like Interface**: Familiar API for users of SHAP package
-3. ✅ **Configurable**: All thresholds and parameters customizable
-4. ✅ **Layered**: Extract → Trajectory → Enrichment → Visualization
-5. ✅ **Explicit Metrics**: Geographic summaries label path magnitude and representation separately
-6. ✅ **Exportable**: JSON, CSV, Dict formats for integration
-7. ✅ **XGBoost-Specific** (with future extensibility)
-
----
-
-## License
-
-(Specify as needed)
-
----
-
-## Contributing
-
-Contributions welcome! Key areas for enhancement:
-- Support for LightGBM, CatBoost
-- Advanced Shapley value metrics
-- Model drift tracking
-- Interactive dashboard integration
+# AI Usage statement
+For the development of this project, AI tools were used to assist in drafting and refining documentation, code comments, and explanations. Additionally, AI tools were employed to generate initial code snippets of basic processing and visualization functions for this general implementation without a specific dataset. All AI-generated content was reviewed and edited by the author to ensure accuracy and relevance. The tools used include ChatGPT and Anthropic Claude.
